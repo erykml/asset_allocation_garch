@@ -1,0 +1,471 @@
+---
+title: Long-term asset allocation strategies based on GARCH models -  a simulation
+  exercise
+author: "Eryk Lewinson"
+date: "15/06/2017"
+output: html_document
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+This notebook contains a short exercise connected to investigating the 
+forecasting performance of different GARCH models in a long-term asset 
+allocation problem.
+
+For this project I estimate various univariate AR-(GJR)GARCH models (with
+different distributions of innovations and estimation types, i.e., fixed/
+/rolling/expanding window). I limit the scope of this exercise to only one
+risky asset (in this case the SP500 index) due to the curse of dimensionality.
+For the risk-free rate I take the Federal Fund Rate. I also adjust the returns
+for inflation, using CPI data from the FRED database.
+
+I use the estimated parameters of the GARCH models to simulate the evolution
+of asset returns using the conditional mean/variance decomposition of asset
+returns as in Wilhelmsson (2013). Having the simulated returns' paths,
+I calculate the optimal weights by directly maximizing the expected power
+utility function, as in Barberis (2000), Brandt and van Binsbergen (2007).
+
+To evaluate the performance of different strategies (strategy is in fact the
+same, but based of different model specifications) I employ the modified
+Sharpe ratio. I choose the most basic model (Gaussian GARCH model with the
+fixed window estimation) as the benchmark and measure the outperformance of
+the more complex models.
+
+This document covers the results and interpretation of the results. If you are 
+interested in the functions used for carrying out the analysis, please refer to
+'garch_asset_allocation_simulation_functions.R' script.
+
+
+```{r setup, include = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r defining_functions, message = FALSE, echo = FALSE}
+# User defined functions ----
+
+source('garch_asset_allocation_simulation_functions.R')
+```
+
+# Introduction
+
+Markowitz's (1952) famous research concluded that investors are able to construct optimal portfolios based on the mean and variance of asset returns. Early empirical studies on portfolio management showed that the mean-variance criterion leads to an allocation similar to the one directly derived from optimizing the expected utility function (Levy and Markowitz, 1979). More recent research, for example, Das and Uppal (2004) or Jondeau and Rockinger (2012), suggest that the mean-variance criterion does not always accurately approximate the expected utility. The exceptions occur when asset returns significantly diverge from normality. The authors reported that the mean-variance criterion could reasonably fail to accurately approximate the constant relative risk aversion (CRRA) expected utility in cases when the considered assets are characterized by highly asymmetric (skewed) or heavy-tailed distributions (existence of excess kurtosis), which are after all the stylized facts of asset returns.
+
+In order to enhance the predictability of asset returns and thus to improve portfolio allocation, a number of approaches have been developed in the last two decades. Barberis (2000) examined how the evidence of predictability in asset returns affects optimal portfolio choice for investors with long investment horizons. He found out that even after incorporating parameter uncertainty, there is enough predictability in returns to make investors allocate substantially more to stocks, the longer their investment horizons are. He recognized the necessity to take  the estimation risk (related to the long-horizon asset return predictability) into account. Van Binsbergen and Brandt (2007) investigated the relative numerical performance of different methodological approaches for optimizing portfolio choices and found that when portfolio weights are constrained, for instance by short sale restrictions, iterating on optimized portfolio weights leads to superior results. Wilhelmsson (2013) concluded that a model with time-varying conditional variance, skewness and kurtosis produces significantly better density forecasts than the competing models. Jondeau and Rockinger (2012) investigated the impacts of time variability of higher moments for asset allocation and determined that distribution timing may yield significant incremental economic value. 
+
+I investigate the performance of long-term asset allocation strategy built on the basis of various GARCH models. I choose from a wide selection of GARCH models combined with different distributions of innovations and methods for choosing appropriate estimation samples. Due to the curse of dimensionality, i.e. the exploding number of operations to be carried out with an increase in complexity, I only consider univariate models. Following the estimation of the models, I simulate the evolution of returns and the variance. Then I address the asset allocation problem by maximizing the conditional expected utility function. The key objectives of the experiment are to assess long-term returns predictability and by that potentially improve the profitability of the asset allocation strategy.
+
+# Methodology
+
+I briefly describe the methodology used in this experiment, for more information please refer to the papers mentioned in the bibliography. I begin with the description of the returns decomposition into the conditional mean and variance equations which jointly create the data generating process, the details of using AR-(GJR)GARCH models in forecasting stock returns and the specification of the Monte Carlo simulation experiment. Description of the long-term asset allocation strategy, based on maximizing the conditional expected utility function, and the modified Sharpe ratio as a measure of result evaluation concludes this section.  
+
+## Data generating process
+
+The following equations present the data generating process in the experiment:
+
+$$r_t= \mu + \phi r_{t-1} + \sigma_t z_t$$ 
+
+$$\sigma_t^2 = \omega + \alpha\epsilon_{t-1}^2 + \beta\sigma_{t-1}^2 + \gamma\epsilon_{t-1}^2 I_{(\epsilon_{t-1} < 0)},$$
+
+with
+$$z_t \sim N,SN,T,ST,GED,SGED.$$
+
+The conditional mean equation is governed by the autoregressive process with 1st-degree lag, and the conditional variance equation which is the GJR-GARCH model of Glosten, Jagannathan and Runkle (1993). It is an extension of Bollerslev's (1986) famous GARCH model, with the additional advantage of considering cases in which the influence of positive and negative innovations on the variance is different. In other words, parameter $\alpha$ measures the effect of positive innovations, while $\alpha + \gamma$ are used in case of negative innovations. GARCH model is obtained by setting the $\gamma$ parameter of GJR-GARCH to 0.
+
+The data generating process is based on the specification provided by Wilhelmsson (2013).  However, the present experiment focuses on point forecasts of stock returns and the associated variance using his specification, without modelling the higher moments. In addition, I use the forecasts to build asset allocation strategies, focusing on the practical aspect of stock returns' forecasting. 
+
+For this analysis both GARCH and GJR-GARCH models are taken into account and the following distributions of innovations are considered: Normal (N), skew-Normal (SN), t (T), skew-t (ST), Generalized Error Distribution (GED) and its skew counterpart (SGED). The skew variants of the distributions are obtained using the transformations described in Ferreira and Steel (2006). 
+
+In addition, I employ three estimation methods: fixed, rolling and expanding window approaches. For the fixed one, I estimate the GARCH models on the estimation sample and use the same set of parameters for the whole out-of-sample forecasting. In the rolling approach, I roll the window of length equal to the whole estimation sample one period at a time, while in the expanding window method I simply expand the estimation sample. Summing up, the fixed window approach always uses the same data set, rolling window uses the same quantity of data but coming from different periods and the expanding window uses the largest amount of data. Thereby, I investigate a total of 36 combinations of GARCH models' types, distributions of innovations and estimation variants.
+
+## Simulating the sample paths
+
+I address the long-term asset allocation problem by simulating $N$ sample paths of length $K$ periods for the selected stock returns. I follow the plug-in approach, i.e., I am operating under the assumption that the distribution parameters are known. To obtain these (together with variables such as time $T_0$ innovation and conditional variance required to initialize the simulations) I estimate the selected GARCH models for all specifications using maximum likelihood estimation and implement the estimated parameters to generate random innovations from the selected distributions. To be more precise, I generate $N * K$ random innovations, where the horizon $K$ ranges from 1 to 52, depending on the time point of the simulation.
+
+## Dynamic asset allocation problem
+
+In the concerned case, I choose only one stock index and restrict the weight to be between 0% and 100% with a grid step of 1%, due to the curse of dimensionality when working with numerical methods. As modelling the risk-free rate is not the objective of this applied project, I keep it constant over time and equal to the mean of the risk-free rate over the estimation period (which is -0.0819%).
+
+Furthermore, I assume that the investor faces an investment horizon of $K$ periods and his allocation period begins in time $T_0$. He estimates one of the considered models using the estimation sample (data up to time point $T_0$) and specifies his optimal portfolio weight $w_{T_0}$. Then he proceeds to time period $T_0 + 1$, thus in the case of rolling/expanding window changing the information set and is able to re-estimate the considered model with the updated estimation sample. By advancing in time by one period, his investment horizon is reduced to $K - 1$. In period $T_0 + K - 1$, his horizon is equal to 1 and he can use all the available data until this point to choose his last allocation weight depending on the estimation method. The sequence of $K$ portfolio weights that is obtained by the described process results in one terminal wealth value $w_{T_0 + K}$. I follow the approach similar to the one presented in Barberis (2000) and Brandt and van Binsbergen (2007). The investor's preferences are described by the CRRA power utility function. The initial wealth is normalized to 1. Analogically to Barberis (2000), I directly optimize the power utility function to obtain the optimal weights.  
+
+Note that, the investor's problem can be described as maximizing the following equation:
+
+$$max_{T_0} E_{T_0} \frac{W_{T_{0} + K}^{1 - \lambda}}{(1 - \lambda)}$$
+
+which means that the investor is maximizing the terminal wealth (W) over all decisions from time $T_0$ onwards. 
+
+One way of approximating the conditional expectations is by taking across-path sample mean:
+
+$$\frac{1}{N} \sum_{i=1}^{N} \frac{1}{(1- \lambda)} [1+w^G r_T+(1-w^G ) r_f ]^{1 - \lambda}$$
+
+However, in this case, it is not possible due to the fact that different paths have different simulated predictor variables, which in turn implies different conditional expectations. The used predictor variables are: conditional variance and lagged simulated returns due to the autoregressive structure of the conditional mean equation. Following Brandt and van Binsbergen (2007), I use across-path OLS regression to approximate the conditional expectation. The across-path sample mean can be used in the very last step of the algorithm. For a more detailed description of the steps of the backward recursion asset allocation strategy, please refer to the paper of Brandt and van Binsbergen (2007).
+
+## Evaluating the performance of different specifications for the long-term investor
+
+A priori, I expect the models with more complex distributions of innovations and/or the ones using rolling/expanding window to outperform the simple models. Therefore, I measure the performance of the models by comparing them to the benchmark model among the considered ones. As a measure of comparison, the following modified Sharpe ratio (mSR) as defined by Graham and Harvey (1997) is used 
+
+$$mSR=  \frac{\sigma_0}{\sigma_p}(m_p - r_f) - (m_0 - r_f)$$
+
+where $m_0$ and $\sigma_0$ are the average return and volatility of the benchmark specification, while subscript \textit{p} refers to the more complex specification in the comparison. One of the disadvantages of this measure is that it does not take into accounts the higher moments of the portfolio returns. In other words, the impacts of non-normality of the distribution are not considered.
+
+# Loading packages 
+
+```{r include = FALSE, messages = FALSE, error = FALSE}
+packages <-
+    c("tseries", "dplyr", "rugarch", "foreach", "doParallel", 
+      "PerformanceAnalytics", "fBasics", "reshape2", "ggplot2",
+      "tictoc", "magrittr", "data.table")
+
+load_packages(packages)
+rm(packages)
+```
+
+# Loading and manipulating data
+
+For the exercise I use S&P 500 index returns, a market-capitalisation weighted index of the largest 500 publicly traded companies in the US.
+I chose it due to the fact that the US market is the biggest market in terms of percentage of world's market capitalisation and trading volume and thus it is not likely to drive the results by extreme behaviour, which could be expected from more exotic data. It is also one of the indices used by Wilhelmsson (2013).
+
+I download weekly close prices from Yahoo Finance.
+
+```{r message = FALSE}
+sp <- get.hist.quote(instrument = "^GSPC", 
+                     start = "1987-12-22", 
+                     end = "2001-02-01", 
+                     quote = "Close", 
+                     provider = "yahoo", 
+                     compression = "w") %>% 
+      as.data.frame()
+
+sp_p <- data.frame(date = row.names(sp), 
+                   price = sp$Close)  
+
+head(sp_p)
+```
+
+From the prices I calculate simple returns.
+
+```{r}
+n <- dim(sp_p)[1]
+rtns <- sp_p$price[2:n] / sp_p$price[1:(n - 1)] - 1
+rtns <- data.frame(date = sp_p$date[2:n], 
+                   rtns = rtns)
+rtns$date <- as.Date(rtns$date)
+rm(sp, sp_p, n)
+head(rtns)
+```
+
+Aside from the returns series I need some external data, i.e., the risk-free rate and inflation. For the risk-free rate I take the Federal Fund Rate. I also adjust the returns for inflation, using CPI data from the FRED database.
+
+```{r}
+rf_df <- read.csv('FEDFUNDS.csv')
+n_rf <- dim(rf_df)[1]
+rtns_rf <- rf_df$FEDFUNDS[2:n_rf] / rf_df$FEDFUNDS[1:(n_rf - 1)] - 1
+rf <- data.frame(date = rf_df$DATE[2:n_rf],
+                 rf = rtns_rf)
+rf$date <- as.Date(rf$date)
+rm(n_rf, rf_df, rtns_rf)
+
+cpi_df <- read.csv('CPIAUCSL.csv')
+n_cpi <- dim(cpi_df)[1]
+rtns_cpi <- cpi_df$CPIAUCSL[2:n_cpi] / cpi_df$CPIAUCSL[1:(n_cpi - 1)] - 1
+infl <- data.frame(date = cpi_df$DATE[2:n_cpi],
+                   infl = rtns_cpi)
+infl$date <- as.Date(infl$date)
+rm(n_cpi, cpi_df, rtns_cpi)
+```
+
+I divide the dataset into two subsamples: the estimation sample (covering years 1988-1999 with a total of 626 observations) and the evaluation sample (year 2000 with 52 observations).
+
+```{r}
+## selecting sample period
+
+sample_start <- as.Date('1988-01-01')
+estimation_end <- as.Date('1999-12-31')
+sample_end <- as.Date('2000-12-31')
+
+## selecting only valid dates
+
+rtns %>% dplyr::filter(date >= sample_start & date <= sample_end) -> rtns
+rf %>% dplyr::filter(date >= sample_start & date <= sample_end) -> rf
+infl %>% dplyr::filter(date >= sample_start & date <= sample_end) -> infl
+```
+
+The next step involves changing the frequency of the risk-free and inflation from monthly to weekly.
+
+```{r message = FALSE}
+rf_weekly <- rf %>% 
+                mutate(date = substr(date, 1, 7), 
+                       rf = rf * 12 / 52)
+
+infl_weekly <- infl %>% 
+               mutate(date = substr(date, 1, 7),
+                      infl = infl * 12 / 52)
+
+rf <- data.frame(date = substr(rtns$date, 1, 7)) %>% 
+      left_join(., rf_weekly, by = 'date') %>% 
+      mutate(date = rtns$date)
+
+infl <- data.frame(date = substr(rtns$date, 1, 7)) %>% 
+        left_join(., infl_weekly, by = 'date') %>% 
+        mutate(date = rtns$date)
+
+rm(rf_weekly, infl_weekly)
+```
+
+The last step involves accounting for inflation in the returns series. 
+
+```{r}
+rf$rf <- (1 + rf$rf) / (1 + infl$infl) - 1
+rtns$rtns <- (1 + rtns$rtns) / (1 + infl$infl) - 1
+rm(infl)
+```
+
+## Summary statistics
+
+Before calculating the summary statistics I need to set up a few global parameters.
+
+```{r}
+length <- 52 # no. of forecasting periods
+rolling_window <- 52 * 12 # length of rolling window
+start <- sum(rtns$date <= estimation_end) # last period of estimation sample
+mean_rf <- mean(rf$rf[1:start]) # mean risk-free rate
+n <- length(rtns$rtns)
+```
+
+```{r}
+summary_stat <- data.frame(period = c('estimation_sample', 'evaluation_sample'),
+                           mean = c((((1 + mean(rtns$rtns[1:start])) ^ 52) - 1) * 100,
+                                    (((1 + mean(rtns$rtns[(start+1):n])) ^ 52) - 1) * 100),
+                           std = c(sd(100 * rtns$rtns[1:start]) * sqrt(52),
+                                   sd(100 * rtns$rtns[(start+1):n]) * sqrt(52)),
+                           skewness = c(skewness(rtns$rtns[1:start]),
+                                        skewness(rtns$rtns[(start+1):n])),
+                           kurtosis = c(kurtosis(rtns$rtns[1:start], method="moment"),
+                                        kurtosis(rtns$rtns[(start+1):n], method="moment")),
+                           jarque_bera = c(jarqueberaTest(rtns$rtns[1:start])@test$p.value,
+                                           jarqueberaTest(rtns$rtns[(start+1):n])@test$p.value),
+                           acf = c(acf(rtns$rtns[1:start],plot=F,lag.max=1)$acf[2],
+                                   acf(rtns$rtns[(start+1):n],plot=F,lag.max=1)$acf[2]),
+                           acf_2 = c(acf((rtns$rtns[1:start])^2,plot=F,lag.max=1)$acf[2],
+                                     acf((rtns$rtns[(start+1):n])^2,plot=F,lag.max=1)$acf[2])
+                           ) %>% data.table(.)
+rm(n)
+summary_stat
+```
+
+The first important aspect to note is the fact that the annualized average returns from the evaluation sample are negative. There is also higher variance in this period. Both of these characteristics affect the performance of the asset allocation strategy. Negative skewness and excess kurtosis are in conformity to the stylized facts of asset returns, that means, the distribution of asset returns is not normal and can be characterized by fat-tailed, peaked (the effect of excess kurtosis), and negatively skewed distribution. However, the Jarque-Bera normality test only confirms this hypothesis in the case of the estimation sample. There is also some evidence of serial correlation in the returns (also squared returns). Correlation in the squared returns implies temporal variation in the second moments, which is also in accordance with the stylized facts of asset returns.
+
+# Running the simulations
+
+Before running the simulations I need to prepare a grid of possible combinations.
+The three categories include: 
+* model type: either GARCH or GJR-GARCH
+* distribution of innovations: Gaussian, skewed Guassian, t, skewed t, Generalized Error Distribution and skewed GED
+* estimation type: fixed/rolling/expanding window
+
+```{r}
+model_combinations <- expand.grid(c('sGARCH', 'gjrGARCH'),
+                                  c('norm', 'snorm', 'std', 
+                                    'sstd', 'ged', 'sged'), 
+                                  c('fixed', 'rolling', 'expanding'), 
+                                  stringsAsFactors = FALSE) %>% 
+                      as.data.frame() %>% 
+                      'colnames<-'(c('model', 'distr', 'est_type')) %>% 
+                      mutate(window = ifelse(est_type == 'rolling',
+                                             rolling_window, 0)) 
+```
+
+As these computations are quite heavy and time-consuming, I run them in parallel. Another assumption I make is regarding the level of investors' risk aversion - I only consider an investor who is not very risk averse with $\lambda = 5$. Of course results for other values of the parameters can be easily obtained by changing the parameter value in the function call. To ensure that the results are stable, for each configuration I run $n = 100000$ simulations.
+
+```{r messages = FALSE, warning = FALSE}
+## setting up parallel computation
+tic('Simulation time: ')
+no_cores <- detectCores() - 1
+registerDoParallel(makeCluster(no_cores))
+
+sim_results <- foreach(model_indices = seq(dim(model_combinations)[1]),
+                       .combine = data.frame,
+                       .export = as.vector(lsf.str()), 
+                       .packages = c('dplyr', 'tseries', 'rugarch'))  %dopar%  
+    garch_simulations(rtns = 100 * rtns$rtns, 
+                      mean_rf = mean_rf,
+                      n_sims = 1000,
+                      est_type = model_combinations$est_type[model_indices], 
+                      garch_type = model_combinations$model[model_indices],
+                      distr = model_combinations$distr[model_indices],
+                      start = start, 
+                      length = length,
+                      window_length = model_combinations$window[model_indices],
+                      lambda = 5)
+toc()
+
+## renaming simulation results
+sim_results %<>% 'colnames<-'(paste(model_combinations$est_type,
+                                   model_combinations$model,
+                                   model_combinations$distr, 
+                                   sep = '_')) 
+```
+
+# Analyzing the results 
+
+This section presents the results of the simulation experiment. I will not include the estimated coefficients of the GARCH models due to the large number of estimated variants. Instead I focus on portfolio returns and the comparison between various specifications. 
+
+After obtaining the simulations' results I calculate summary statistics (mean, standard deviation, skewness, kurtosis and Sharpe ratio) of realized portfolio returns.
+
+```{r}
+# defining an empty results data.frame
+portfolio_rtns_stats <- data.frame(model = character(),
+                                   mean = double(),
+                                   sd = double(), 
+                                   skew = double(),
+                                   kurt = double(),
+                                   SR = double(),
+                                   stringsAsFactors = FALSE)
+
+# filling the data.frame with results
+for (i in seq(dim(sim_results)[2]))
+{
+    portfolio_rtns_stats[i, ] <- c(colnames(sim_results)[i],
+                                   round((((1 + mean(sim_results[, i])) ^ 52) - 1) * 100, 4),
+                                   round(sd(sim_results[, i]) * sqrt(52) * 100, 4),
+                                   round(skewness(sim_results[, i]), 4),
+                                   round(kurtosis(sim_results[, i], method="moment"), 4),
+                                   round((mean(sim_results[, i]) - mean_rf) / sd(sim_results[, i]), 4)
+                                   )
+}
+
+data.table(portfolio_rtns_stats)
+```
+
+One can observe that the annualized average portfolio returns are positive and in the vast majority of cases are higher than those of the simplest GARCH model with Gaussian innovations and fixed window approach. Further, in most cases, the annualized standard deviation is lower than in the benchmark case and the Sharpe ratios are higher than those of the benchmark. 
+
+The following figures present the evolution of simulated portfolio returns over time. Analysis of the plots leads to the conclusion that using different model specifications results in somehow similar performance of the allocation strategy. However, there are a few periods, where varying portfolio returns can be observed. It is noteworthy that by following the strategy originating from the GARCH models, the investor is able to obtain lower negative returns than by simply investing in the S&P 500 index (like in April 2000). Hence, the losses are reduced. As the plots regarding the rolling/expanding window estimation types can be interpreted analogically, I attach them the in the Appendix.
+
+```{r message = FALSE, warning = FALSE}
+# Additional plots and figures (load averything from start) ----
+
+## downloading sp500 stock prices
+
+sp <- get.hist.quote(instrument = "^GSPC", 
+                     start = "1987-12-22", 
+                     end = "2001-02-01", 
+                     quote = "Close", 
+                     provider = "yahoo", 
+                     compression = "w") %>% 
+      as.data.frame()
+
+sp_p <- data.frame(date = row.names(sp), 
+                   price = sp$Close)  
+
+## calculating returns
+
+n <- dim(sp_p)[1]
+rtns <- sp_p$price[2:n]/sp_p$price[1:(n-1)] - 1
+rtns <- data.frame(date = sp_p$date[2:n], 
+                   rtns = rtns)
+rtns$date <- as.Date(rtns$date)
+rm(sp, sp_p, n)
+
+## load simulation results
+to_add <- dplyr::filter(rtns, date >= '2000-01-01' &
+                              date < '2001-01-01') %>% 
+          'colnames<-'(c('date', 'actual_rtns'))
+
+sim_results_plot <- sim_results %>% 
+                    cbind(., to_add)
+
+colnames(sim_results_plot) <- colnames(sim_results_plot) %>% 
+                         gsub('_', ' ', .) %>% 
+                         gsub('norm', 'N', .) %>% 
+                         gsub('snorm', 'SN', .) %>%
+                         gsub('std', 'T', .) %>%
+                         gsub('sstd', 'ST', .) %>%
+                         gsub('ged', 'GED', .) %>%
+                         gsub('sged', 'SGED', .) %>% 
+                         gsub('fixed ', '', .) %>%
+                         gsub('rolling ', '', .) %>% 
+                         gsub('expanding ', '', .) %>% 
+                         gsub(' ', '-', .) %>% 
+                         gsub('actual-rtns', 'Actual returns', .)
+
+rm(to_add)
+
+sim_results_fixed_long <- melt(sim_results_plot[,c(1:12, 37:38)], id="date")  
+sim_results_rolling_long <- melt(sim_results_plot[,c(13:24, 37:38)], id="date")  
+sim_results_expanding_long <- melt(sim_results_plot[,c(25:36, 37:38)], id="date")  
+
+Sys.setlocale("LC_TIME", "English")
+
+ggplot(data=sim_results_fixed_long,
+       aes(x=date, y=value, colour=variable)) +
+       geom_line() +
+       ggtitle("Portfolio returns over the evaluation sample (fixed window)") +
+       xlab('Date') +
+       ylab('Returns') +
+       theme(plot.title = element_text(lineheight=.8, face="bold")) 
+
+
+ggplot(data=sim_results_rolling_long,
+       aes(x=date, y=value, colour=variable)) +
+       geom_line() +
+       ggtitle("Portfolio returns over the evaluation sample (rolling window)") +
+       xlab('Date') +
+       ylab('Returns') +
+       theme(plot.title = element_text(lineheight=.8, face="bold"))
+
+ggplot(data=sim_results_expanding_long,
+       aes(x=date, y=value, colour=variable)) +
+       geom_line() +
+       ggtitle("Portfolio returns over the evaluation sample (expanding window)") +
+       xlab('Date') +
+       ylab('Returns') +
+       theme(plot.title = element_text(lineheight=.8, face="bold"))
+```
+
+The last step involves evaluating how asset allocation strategies based on more advanced models outperform a simple benchmark. To do so I select a Gaussian GARCH model witha fixed window as the simplest model and I will use it as the benchmark. The evaluation of the outperformance is done with the help of the modified Sharpe ratio and the results are presented in the following table:
+
+```{r}
+msr_results <- sapply(sim_results[, -1], function(x) mSR(x, sim_results[, 1], 
+                                          rf$rf[(start + 1):length(rf$rf)])) %>% 
+               data.frame(variant = names(.),
+                          mSR = .,
+                          row.names = NULL)
+data.table(msr_results)
+```
+
+It can be observed that while comparing the more complex model specifications to the simple benchmark, the performance is almost always better in terms of the modified Sharpe ratio. The few cases with the fixed window estimation type and T/GED distributed innovations perform worse than the benchmark, but there is no clear indication as to the reason behind it. 
+
+# Conclusions
+
+In this exercise I investigated whether an investor can benefit from accurately predicting stock returns (in the case of the S&P 500 index) using various specifications of AR(1) - (GJR)GARCH models. Thereby, I have assumed constant risk-free rate and risk aversion level of the investor. The empirical results show that, in some cases, using more complex and univariate models leads to more profitable asset allocation strategies, by the means of the modified Sharpe ratio. For instance, the (GJR)GARCH with SGED distribution and expanding window estimation has the greatest outperformance compared to the benchmark model. 
+
+I would also like to suggest some further modification, which might yield interesting results. Firstly, following the idea of Wilhelmsson (2013) and Jondeau and Rockinger (2012) it might be interesting to account for time variability in the higher moments of asset returns. Secondly, an extended investigation of the expanding window would be worthwhile, to determine the optimal window length. Thirdly, one should definitely consider other values of the parameter of risk aversion. In literature, it is common to use ?? = 10 or 15 as well, which correspond to more risk-averse investors. Lastly, as this paper covered a simplified case with only one single risky asset together with the risk-free rate, it would be certainly interesting to investigate the performance of a multi-asset portfolio. To do so one would need to overcome the curse of dimensionality. In addition, less developed markets or alternative assets such as crypto currencies could be interesting datasets to explore due to their highly volatile nature.  
+
+# Bibliography
+
+* Barberis, N. (2000) Investing for the long run when returns are predictable, The Journal of Finance, 55(1), 225-264.
+
+* Bollerslev, T. (1986) Generalized autoregressive conditional heteroskedasticity, Journal of econometrics, 31(3), 307-327.
+
+* Das, S. R. & Uppal, R. (2004) Systemic risk and international portfolio choice, The Journal of Finance, 59(6), 2809-2834.
+
+* Ferreira J.T. & Steel M.F. (2006) A constructive representation of univariate skewed distributions, Journal of the American Statistical Association, 101(474):823???829.
+
+* Glosten, L., Jagannathan, R. & Runkle, D. (1993) On the relation between the expected value and the volatility of the nominal excess return on stocks, Journal of Finance, 48, 1779-1801.
+
+* Graham, J. R & Harvey, C.R. (1997) Grading the Performance of Market-Timing Newsletters, Financial Analysts Journal 54: 54-66.
+
+* Jarque, C. M. & Bera, A. K. (1987) A test for normality of observations and regression residuals, International Statistical Review/Revue Internationale de Statistique, 163-172.
+
+* Jondeau, E. & Rockinger M. (2012) On the importance of time variability in higher moments for asset allocation, The Journal of Financial Econometrics, 10, 84 - 123.
+
+* Levy, H. & Markowitz, H. M. (1979) Approximating expected utility by a function of mean and variance, The American Economic Review, 69(3), 308-317.
+
+* Markowitz, H. (1952) Portfolio selection, The Journal of Finance, 7(1), 77-91.
+
+* Wilhelmsson, A. (2013) Density Forecasting with Time Varying Higher Moments: A Model Confidence Set Approach, Journal of Forecasting, 32(1), 19-31.
+
+* Van Binsbergen, J. H. & Brandt, M. W. (2007). Solving dynamic portfolio choice problems by recursing on optimized portfolio weights or on the value function?, Computational Economics, 29(3-4), 355-367.
+
