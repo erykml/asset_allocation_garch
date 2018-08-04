@@ -2,7 +2,7 @@
 title: Long-term asset allocation strategies based on GARCH models -  a simulation
   exercise
 author: "Eryk Lewinson"
-date: "15/06/2017"
+date: "20/06/2018"
 output: html_document
 ---
 
@@ -72,13 +72,14 @@ $$\sigma_t^2 = \omega + \alpha\epsilon_{t-1}^2 + \beta\sigma_{t-1}^2 + \gamma\ep
 with
 $$z_t \sim N,SN,T,ST,GED,SGED.$$
 
-The conditional mean equation is governed by the autoregressive process with 1st-degree lag, and the conditional variance equation which is the GJR-GARCH model of Glosten, Jagannathan and Runkle (1993). It is an extension of Bollerslev's (1986) famous GARCH model, with the additional advantage of considering cases in which the influence of positive and negative innovations on the variance is different. In other words, parameter $\alpha$ measures the effect of positive innovations, while $\alpha + \gamma$ are used in case of negative innovations. GARCH model is obtained by setting the $\gamma$ parameter of GJR-GARCH to 0.
+The conditional mean equation is governed by the autoregressive process with 1st-degree lag, and the conditional variance equation is the GJR-GARCH model of Glosten, Jagannathan and Runkle (1993). It is an extension of Bollerslev's (1986) famous GARCH model, with the additional advantage of considering cases in which the influence of positive and negative innovations on the variance is different. In other words, parameter $\alpha$ measures the effect of positive innovations, while $\alpha + \gamma$ are used in case of negative innovations. GARCH model is obtained by setting the $\gamma$ parameter of GJR-GARCH to 0.
 
 The data generating process is based on the specification provided by Wilhelmsson (2013).  However, the present experiment focuses on point forecasts of stock returns and the associated variance using his specification, without modelling the higher moments. In addition, I use the forecasts to build asset allocation strategies, focusing on the practical aspect of stock returns' forecasting. 
 
 For this analysis both GARCH and GJR-GARCH models are taken into account and the following distributions of innovations are considered: Normal (N), skew-Normal (SN), t (T), skew-t (ST), Generalized Error Distribution (GED) and its skew counterpart (SGED). The skew variants of the distributions are obtained using the transformations described in Ferreira and Steel (2006). 
 
-In addition, I employ three estimation methods: fixed, rolling and expanding window approaches. For the fixed one, I estimate the GARCH models on the estimation sample and use the same set of parameters for the whole out-of-sample forecasting. In the rolling approach, I roll the window of length equal to the whole estimation sample one period at a time, while in the expanding window method I simply expand the estimation sample. Summing up, the fixed window approach always uses the same data set, rolling window uses the same quantity of data but coming from different periods and the expanding window uses the largest amount of data. Thereby, I investigate a total of 36 combinations of GARCH models' types, distributions of innovations and estimation variants.
+In addition, I employ three estimation methods: fixed, rolling and expanding window approaches. For the fixed one, I estimate the GARCH models on the estimation sample and use the same set of parameters for the whole out-of-sample forecasting. In the rolling approach, I roll the window of length equal to the whole estimation sample one period at a time, while in the expanding window method I simply expand the estimation sample. 
+Summing up, the fixed window approach always uses the same data set, rolling window uses the same quantity of data but coming from different periods and the expanding window uses the largest amount of data. Thereby, I investigate a total of 36 combinations of GARCH models' types, distributions of innovations and estimation variants.
 
 ## Simulating the sample paths
 
@@ -86,7 +87,9 @@ I address the long-term asset allocation problem by simulating $N$ sample paths 
 
 ## Dynamic asset allocation problem
 
-In the concerned case, I choose only one stock index and restrict the weight to be between 0% and 100% with a grid step of 1%, due to the curse of dimensionality when working with numerical methods. As modelling the risk-free rate is not the objective of this applied project, I keep it constant over time and equal to the mean of the risk-free rate over the estimation period (which is -0.0819%).
+In the concerned case, I choose only one stock index and restrict the weight to be between 0% and 100% with a grid step of 1%, due to the curse of dimensionality when working with numerical methods. With today's rapidly increasing computing power and cloud solutions expanding this to a multi-asset framework should not be a problem. However, I follow the research papers and for now focus on a single risky asset.
+
+As modelling the risk-free rate is not the objective of this project, I keep it constant over time and equal to the mean of the risk-free rate over the estimation period (which is -0.0819%).
 
 Furthermore, I assume that the investor faces an investment horizon of $K$ periods and his allocation period begins in time $T_0$. He estimates one of the considered models using the estimation sample (data up to time point $T_0$) and specifies his optimal portfolio weight $w_{T_0}$. Then he proceeds to time period $T_0 + 1$, thus in the case of rolling/expanding window changing the information set and is able to re-estimate the considered model with the updated estimation sample. By advancing in time by one period, his investment horizon is reduced to $K - 1$. In period $T_0 + K - 1$, his horizon is equal to 1 and he can use all the available data until this point to choose his last allocation weight depending on the estimation method. The sequence of $K$ portfolio weights that is obtained by the described process results in one terminal wealth value $w_{T_0 + K}$. I follow the approach similar to the one presented in Barberis (2000) and Brandt and van Binsbergen (2007). The investor's preferences are described by the CRRA power utility function. The initial wealth is normalized to 1. Analogically to Barberis (2000), I directly optimize the power utility function to obtain the optimal weights.  
 
@@ -262,7 +265,7 @@ The first important aspect to note is the fact that the annualized average retur
 Before running the simulations I need to prepare a grid of possible combinations.
 The three categories include: 
 * model type: either GARCH or GJR-GARCH
-* distribution of innovations: Gaussian, skewed Guassian, t, skewed t, Generalized Error Distribution and skewed GED
+* distribution of innovations: Gaussian, skewed Gaussian, t, skewed t, Generalized Error Distribution and skewed GED
 * estimation type: fixed/rolling/expanding window
 
 ```{r}
@@ -282,7 +285,7 @@ As these computations are quite heavy and time-consuming, I run them in parallel
 ```{r messages = FALSE, warning = FALSE}
 ## setting up parallel computation
 tic('Simulation time: ')
-no_cores <- detectCores() - 1
+no_cores <- detectCores() - 3
 registerDoParallel(makeCluster(no_cores))
 
 sim_results <- foreach(model_indices = seq(dim(model_combinations)[1]),
@@ -291,7 +294,7 @@ sim_results <- foreach(model_indices = seq(dim(model_combinations)[1]),
                        .packages = c('dplyr', 'tseries', 'rugarch'))  %dopar%  
     garch_simulations(rtns = 100 * rtns$rtns, 
                       mean_rf = mean_rf,
-                      n_sims = 1000,
+                      n_sims = 100000,
                       est_type = model_combinations$est_type[model_indices], 
                       garch_type = model_combinations$model[model_indices],
                       distr = model_combinations$distr[model_indices],
@@ -441,7 +444,7 @@ It can be observed that while comparing the more complex model specifications to
 
 In this exercise I investigated whether an investor can benefit from accurately predicting stock returns (in the case of the S&P 500 index) using various specifications of AR(1) - (GJR)GARCH models. Thereby, I have assumed constant risk-free rate and risk aversion level of the investor. The empirical results show that, in some cases, using more complex and univariate models leads to more profitable asset allocation strategies, by the means of the modified Sharpe ratio. For instance, the (GJR)GARCH with SGED distribution and expanding window estimation has the greatest outperformance compared to the benchmark model. 
 
-I would also like to suggest some further modification, which might yield interesting results. Firstly, following the idea of Wilhelmsson (2013) and Jondeau and Rockinger (2012) it might be interesting to account for time variability in the higher moments of asset returns. Secondly, an extended investigation of the expanding window would be worthwhile, to determine the optimal window length. Thirdly, one should definitely consider other values of the parameter of risk aversion. In literature, it is common to use ?? = 10 or 15 as well, which correspond to more risk-averse investors. Lastly, as this paper covered a simplified case with only one single risky asset together with the risk-free rate, it would be certainly interesting to investigate the performance of a multi-asset portfolio. To do so one would need to overcome the curse of dimensionality. In addition, less developed markets or alternative assets such as crypto currencies could be interesting datasets to explore due to their highly volatile nature.  
+I would also like to suggest some further modification, which might yield interesting results. Firstly, following the idea of Wilhelmsson (2013) and Jondeau and Rockinger (2012) it might be interesting to account for time variability in the higher moments of asset returns. Secondly, an extended investigation of the expanding window would be worthwhile, to determine the optimal window length. Thirdly, one should definitely consider other values of the parameter of risk aversion. In literature, it is common to use  $\lambda = (10,15)$ as well, which correspond to more risk-averse investors. Lastly, as this paper covered a simplified case with only one single risky asset together with the risk-free rate, it would be certainly interesting to investigate the performance of a multi-asset portfolio. To do so one would need to overcome the curse of dimensionality. In addition, less developed markets or alternative assets such as crypto currencies could be interesting datasets to explore due to their highly volatile nature.  
 
 # Bibliography
 
@@ -451,7 +454,7 @@ I would also like to suggest some further modification, which might yield intere
 
 * Das, S. R. & Uppal, R. (2004) Systemic risk and international portfolio choice, The Journal of Finance, 59(6), 2809-2834.
 
-* Ferreira J.T. & Steel M.F. (2006) A constructive representation of univariate skewed distributions, Journal of the American Statistical Association, 101(474):823???829.
+* Ferreira J.T. & Steel M.F. (2006) A constructive representation of univariate skewed distributions, Journal of the American Statistical Association, 101(474).
 
 * Glosten, L., Jagannathan, R. & Runkle, D. (1993) On the relation between the expected value and the volatility of the nominal excess return on stocks, Journal of Finance, 48, 1779-1801.
 
